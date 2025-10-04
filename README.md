@@ -1,6 +1,6 @@
 # fork details
 
-I only forked this so I can rebuild it from source nad controll all updates to it on my infra, otherwise it follows original [tenseiken/docker-qbittorrent-wireguard](https://github.com/tenseiken/docker-qbittorrent-wireguard) project
+I only forked this so I can rebuild it from source and controll all updates to it on my infra, otherwise it follows original [tenseiken/docker-qbittorrent-wireguard](https://github.com/tenseiken/docker-qbittorrent-wireguard) project
 
 # [qBittorrent](https://github.com/qbittorrent/qBittorrent) and WireGuard
 
