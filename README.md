@@ -1,3 +1,7 @@
+# fork details
+
+I only forked this so I can rebuild it from source and controll all updates to it on my infra, otherwise it follows original [tenseiken/docker-qbittorrent-wireguard](https://github.com/tenseiken/docker-qbittorrent-wireguard) project
+
 # [qBittorrent](https://github.com/qbittorrent/qBittorrent) and WireGuard
 
 Docker container which runs [qBittorrent](https://github.com/qbittorrent/qBittorrent)-nox (headless) version 5.1.2 client while connecting to WireGuard with iptables killswitch to prevent IP leakage when the tunnel goes down.
