@@ -105,26 +105,6 @@ else
 	exit 1
 fi
 
-export NAME_SERVERS=$(echo "${NAME_SERVERS}" | sed -e 's~^[ \t]*~~;s~[ \t]*$~~')
-if [[ ! -z "${NAME_SERVERS}" ]]; then
-	echo "[INFO] NAME_SERVERS defined as '${NAME_SERVERS}'" | ts '%Y-%m-%d %H:%M:%.S'
-else
-	echo "[WARNING] NAME_SERVERS not defined (via -e NAME_SERVERS), defaulting to CloudFlare and Google name servers" | ts '%Y-%m-%d %H:%M:%.S'
-	export NAME_SERVERS="1.1.1.1,8.8.8.8,1.0.0.1,8.8.4.4"
-fi
-
-# split comma seperated string into list from NAME_SERVERS env variable
-IFS=',' read -ra name_server_list <<<"${NAME_SERVERS}"
-
-# process name servers in the list
-for name_server_item in "${name_server_list[@]}"; do
-	# strip whitespace from start and end of lan_network_item
-	name_server_item=$(echo "${name_server_item}" | sed -e 's~^[ \t]*~~;s~[ \t]*$~~')
-
-	echo "[INFO] Adding ${name_server_item} to resolv.conf" | ts '%Y-%m-%d %H:%M:%.S'
-	echo "nameserver ${name_server_item}" >>/etc/resolv.conf
-done
-
 if [[ -z "${PUID}" ]]; then
 	echo "[INFO] PUID not defined. Defaulting to root user" | ts '%Y-%m-%d %H:%M:%.S'
 	export PUID="root"
@@ -141,6 +121,22 @@ if ip link | grep -q $(basename -s .conf $VPN_CONFIG); then
 	wg-quick down $VPN_CONFIG || echo "WireGuard is down already" | ts '%Y-%m-%d %H:%M:%.S' # Run wg-quick down as an extra safeguard in case WireGuard is still up for some reason
 	sleep 0.5                                                                               # Just to give WireGuard a bit to go down
 fi
+
+# Extract the DNS addresses from wg0.conf; reformat them in resolv.conf format; store in /opt/dns
+# In order:
+ # read wg0.conf and find just the DNS line
+ # remove "DNS", case insensitive
+ # remove "="
+ # remove extraneous spaces
+ # replace commas with newlines
+ # append "nameserver " to the beginning of each line
+ # output to /opt/dns
+grep -i DNS /config/wireguard/wg0.conf | sed 's/DNS//ig' | sed 's/=//g' | sed 's/ //g' | sed 's/,/\n/g' | sed 's/^/nameserver /g' > /opt/dns
+
+resolvconf -u >/dev/null 2>&1 # Required to prevent a signature mismatch error. Discard output because it's going to complain about no useable init system.
+resolvconf -a wg0 -m 0 -x < /opt/dns >/dev/null 2>&1 # Import the dns file with resolvconf. Discard output because it's going to complain about no useable init system.
+rm /opt/dns
+
 wg-quick up $VPN_CONFIG
 
 exec /bin/bash /etc/qbittorrent/iptables.sh

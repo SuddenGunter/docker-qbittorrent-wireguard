@@ -84,6 +84,15 @@ if [[ ${PUID} != $qbtUID || ${PGID} != $qbtGID ]]; then
 	usermod -u ${PUID} -g ${PGID} qbtUser
 fi
 
+# Check for presence of qBittorrent's lockfile, delete if present.
+LOCKFILE="/config/qBittorrent/config/lockfile"
+
+if [ -e $LOCKFILE ]; then
+	echo "[WARNING] The qBittorrent lockfile exists. Did you cleanly shutdown qBittorrent last time?" | ts '%Y-%m-%d %H:%M:%.S'
+	echo "[WARNING] Deleting lockfile..." | ts '%Y-%m-%d %H:%M:%.S'
+    rm -f $LOCKFILE
+fi
+
 # Start qBittorrent
 echo "[INFO] Starting qBittorrent daemon..." | ts '%Y-%m-%d %H:%M:%.S'
 chmod -R 755 /config/qBittorrent
@@ -174,33 +183,46 @@ if [ -e /proc/$qbittorrentpid ]; then
 
 		# Check the NAT port forward and update qBittorrent config if there is a change.
 		if [[ $ENABLEPROTONVPNPORTFWD -eq 1 ]]; then
-			if [[ -e /run/secrets/webui_pass ]]; then
-				WEBUI_PASS=$(cat /run/secrets/webui_pass)
+			if [[ -e /run/secrets/WEBUI_APIKEY ]]; then
+				WEBUI_APIKEY=$(cat /run/secrets/WEBUI_APIKEY)
 			fi
 
-			# Set up Cloudflare Access headers if they exist
-			CF_HEADERS=""
-			if [[ ! -z "${CF_ACCESS_CLIENT_ID}" ]]; then
-				CF_HEADERS="$CF_HEADERS --header \"CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID\""
-			fi
-			if [[ ! -z "${CF_ACCESS_CLIENT_SECRET}" ]]; then
-				CF_HEADERS="$CF_HEADERS --header \"CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET\""
+			if [[ -e /run/secrets/CF_ACCESS_CLIENT_ID ]]; then
+				CF_ACCESS_CLIENT_ID=$(cat /run/secrets/CF_ACCESS_CLIENT_ID)
 			fi
 
-			loginData="username=$WEBUI_USER&password=$WEBUI_PASS"
-			cookie=$(eval curl -i --silent --header \"Referer: $WEBUI_URL\" $CF_HEADERS --data $loginData $WEBUI_URL/api/v2/auth/login | grep "set-cookie" | awk '/set-cookie:/ {print $2}' | sed 's/;//') >/dev/null 2>&1
-			if [[ $cookie ]]; then
-				setPort=$(eval curl --silent $CF_HEADERS $WEBUI_URL/api/v2/app/preferences --cookie $cookie | jq '.listen_port') >/dev/null 2>&1
-				currentPort=$(natpmpc -a 1 0 udp 60 -g 10.2.0.1 | grep "public port" | awk '/Mapped public port/ {print $4}')
-				if [[ $setPort -ne $currentPort ]]; then
-					portData="json={\"listen_port\":$currentPort}"
-					eval curl -i --silent $CF_HEADERS --data $portData $WEBUI_URL/api/v2/app/setPreferences --cookie $cookie >/dev/null 2>&1
+			if [[ -e /run/secrets/CF_ACCESS_CLIENT_SECRET ]]; then
+				CF_ACCESS_CLIENT_SECRET=$(cat /run/secrets/CF_ACCESS_CLIENT_SECRET)
+			fi
+
+			# Cloudflare mode:
+			if [[ ! -z "${CF_ACCESS_CLIENT_ID}" ]] && [[ ! -z "${CF_ACCESS_CLIENT_SECRET}" ]]; then
+				testResponse=$(curl --silent --show-headers --header "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" --header "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" --header "Authorization: Bearer $WEBUI_APIKEY" $WEBUI_URL/api/v2/app/version | head -1)
+				if [[ "$testResponse" == *"HTTP/2 200"* || "$testResponse" == *"HTTP/1.1 200 OK"* ]]; then
+					setPort=$(curl --silent --header "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" --header "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" --header "Authorization: Bearer $WEBUI_APIKEY" $WEBUI_URL/api/v2/app/preferences | jq '.listen_port')
+					currentPort=$(natpmpc -a 1 0 udp 60 -g 10.2.0.1 | grep "public port" | head -1 | awk '/Mapped public port/ {print $4}')
+					if [[ "$setPort" -ne "$currentPort" ]]; then
+						portData="json={\"listen_port\":$currentPort}"
+						curl --silent --header "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" --header "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" --header "Authorization: Bearer $WEBUI_APIKEY" --data "$portData" $WEBUI_URL/api/v2/app/setPreferences
+					fi
+				else
+					echo "[ERROR] Web UI authentication failed. Cloudflare headers used. Response: $testResponse" | ts '%Y-%m-%d %H:%M:%.S'
+					echo "[ERROR] Make sure you have set required variables and/or secrets. Documentation: https://github.com/tenseiken/docker-qbittorrent-wireguard/wiki/Proton-VPN-Port-Forwarding-with-Wireguard" | ts '%Y-%m-%d %H:%M:%.S'
 				fi
-				eval curl --silent -X 'POST' $CF_HEADERS "$WEBUI_URL/api/v2/auth/logout" -H 'accept: */*' -d '' --cookie $cookie >/dev/null 2>&1
-			else
-				echo "[WARNING] Unable to log into the web UI." | ts '%Y-%m-%d %H:%M:%.S'
+			else # Non-Cloudflare mode:
+				testResponse=$(curl --silent --show-headers --header "Authorization: Bearer $WEBUI_APIKEY" $WEBUI_URL/api/v2/app/version | head -1)
+				if [[ "$testResponse" == *"HTTP/2 200"* || "$testResponse" == *"HTTP/1.1 200 OK"* ]]; then
+					setPort=$(curl --silent --header "Authorization: Bearer $WEBUI_APIKEY" $WEBUI_URL/api/v2/app/preferences | jq '.listen_port')
+					currentPort=$(natpmpc -a 1 0 udp 60 -g 10.2.0.1 | grep "public port" | head -1 | awk '/Mapped public port/ {print $4}')
+					if [[ "$setPort" -ne "$currentPort" ]]; then
+						portData="json={\"listen_port\":$currentPort}"
+						curl --silent --header "Authorization: Bearer $WEBUI_APIKEY" --data "$portData" $WEBUI_URL/api/v2/app/setPreferences
+					fi
+				else
+					echo "[ERROR] Web UI authentication failed. Cloudflare headers not used. Response: $testResponse" | ts '%Y-%m-%d %H:%M:%.S'
+					echo "[ERROR] Make sure you have set required variables and/or secrets. Documentation: https://github.com/tenseiken/docker-qbittorrent-wireguard/wiki/Proton-VPN-Port-Forwarding-with-Wireguard" | ts '%Y-%m-%d %H:%M:%.S'
+				fi
 			fi
-			unset cookie
 		fi
 	done
 else
