@@ -204,5 +204,6 @@ echo "--------------------"
 # start the NAT-PMP port forward loop
 if [[ $ENABLEPROTONVPNPORTFWD -eq 1 ]]; then
 	nohup /etc/qbittorrent/portfwd.sh >/dev/null 2>&1 &
+	sleep 5 # wait 5 seconds to allow the qBittorrent config file to be updated by the loop script. starting too soon causes qbittorrent to miss the updated port in the config.
 fi
 exec /bin/bash /etc/qbittorrent/start.sh
