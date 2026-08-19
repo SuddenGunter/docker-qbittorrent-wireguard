@@ -201,9 +201,15 @@ echo "--------------------"
 iptables -S
 echo "--------------------"
 
-# start the NAT-PMP port forward loop
+# begin handling port forwarding if enabled
 if [[ $ENABLEPROTONVPNPORTFWD -eq 1 ]]; then
+	# start the port forward process and store the public port in $port
+	port=$(natpmpc -a 1 0 udp 60 -g 10.2.0.1 | grep "public port" | awk '/Mapped public port/ {print $4}')
+
+	# find and replace "Session\Port=.*" in /config/qBittorrent/config/qBittorrent.conf with $port
+	sed -i -r "s/^(Session\\\Port=).*/\1$port/" /config/qBittorrent/config/qBittorrent.conf
+
+	#start the port forward maintenance loop.
 	nohup /etc/qbittorrent/portfwd.sh >/dev/null 2>&1 &
-	sleep 5 # wait 5 seconds to allow the qBittorrent config file to be updated by the loop script. starting too soon causes qbittorrent to miss the updated port in the config.
 fi
 exec /bin/bash /etc/qbittorrent/start.sh
